@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>India Towers Map</title>
+        <meta
+            name="viewport"
+            content="initial-scale=1,maximum-scale=1,user-scalable=no"
+        />
+        <!-- MapLibre GL JS -->
+        <script src="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.js"></script>
+        <link
+            href="https://unpkg.com/maplibre-gl@4.1.2/dist/maplibre-gl.css"
+            rel="stylesheet"
+        />
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                font-family: sans-serif;
+                background: #111;
+            }
+            #map {
+                position: absolute;
+                top: 0;
+                bottom: 0;
+                width: 100%;
+            }
+            /* Simple popup styling for dark theme to match your system */
+            .maplibregl-popup-content {
+                background: #222;
+                color: #eee;
+                border-radius: 8px;
+                border: 1px solid #444;
+            }
+            .maplibregl-popup-anchor-bottom .maplibregl-popup-tip {
+                border-top-color: #222;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+
+        <script>
+            const map = new maplibregl.Map({
+                container: "map",
+                style: {
+                    version: 8,
+                    // This free glyphs URL is needed to render text/numbers inside clusters without an API Key
+                    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+                    sources: {
+                        osm: {
+                            type: "raster",
+                            tiles: [
+                                "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+                            ],
+                            tileSize: 256,
+                            attribution: "&copy; OpenStreetMap contributors",
+                        },
+                    },
+                    layers: [
+                        {
+                            id: "osm-layer",
+                            type: "raster",
+                            source: "osm",
+                            minzoom: 0,
+                            maxzoom: 19,
+                        },
+                    ],
+                },
+                center: [78.9629, 20.5937], // Center of India
+                zoom: 4,
+                maxZoom: 18,
+            });
+
+            map.addControl(new maplibregl.NavigationControl());
+
+            map.on("load", () => {
+                // 1. Add our huge dataset as a source
+                map.addSource("towers", {
+                    type: "geojson",
+                    data: "towers.geojson",
+                    cluster: true, // Let MapLibre cluster the points via Web Workers
+                    clusterMaxZoom: 14, // Zoom level where it stops clustering
+                    clusterRadius: 50, // Pixel radius for grouping points together
+                });
+
+                // 2. Add layer for Cluster Circles
+                map.addLayer({
+                    id: "clusters",
+                    type: "circle",
+                    source: "towers",
+                    filter: ["has", "point_count"],
+                    paint: {
+                        // Color and scale circles based on how many towers are inside
+                        "circle-color": [
+                            "step",
+                            ["get", "point_count"],
+                            "#51bbd6", // Blue for < 100 towers
+                            100,
+                            "#f1f075", // Yellow for 100 - 1000 towers
+                            1000,
+                            "#f28cb1", // Pink for > 1000 towers
+                        ],
+                        "circle-radius": [
+                            "step",
+                            ["get", "point_count"],
+                            20, // 20px for < 100
+                            100,
+                            30, // 30px for 100-1000
+                            1000,
+                            40, // 40px for > 1000
+                        ],
+                    },
+                });
+
+                // 3. Add layer for the numbers inside the clusters
+                map.addLayer({
+                    id: "cluster-count",
+                    type: "symbol",
+                    source: "towers",
+                    filter: ["has", "point_count"],
+                    layout: {
+                        "text-field": "{point_count_abbreviated}",
+                        "text-font": ["Open Sans Regular"], // Uses the glyphs defined in style
+                        "text-size": 14,
+                    },
+                    paint: {
+                        "text-color": "#000000",
+                    },
+                });
+
+                // 4. Add layer for individual towers (unclustered)
+                map.addLayer({
+                    id: "unclustered-point",
+                    type: "circle",
+                    source: "towers",
+                    filter: ["!", ["has", "point_count"]],
+                    paint: {
+                        "circle-color": "#11b4da",
+                        "circle-radius": 6,
+                        "circle-stroke-width": 1,
+                        "circle-stroke-color": "#fff",
+                    },
+                });
+
+                // --- INTERACTIVITY ---
+
+                // Click cluster to zoom in
+                map.on("click", "clusters", (e) => {
+                    const features = map.queryRenderedFeatures(e.point, {
+                        layers: ["clusters"],
+                    });
+                    const clusterId = features[0].properties.cluster_id;
+
+                    map.getSource("towers").getClusterExpansionZoom(
+                        clusterId,
+                        (err, zoom) => {
+                            if (err) return;
+                            map.easeTo({
+                                center: features[0].geometry.coordinates,
+                                zoom: zoom,
+                            });
+                        },
+                    );
+                });
+
+                // Click individual tower to show popup
+                map.on("click", "unclustered-point", (e) => {
+                    const coordinates =
+                        e.features[0].geometry.coordinates.slice();
+                    const { id, name } = e.features[0].properties;
+
+                    new maplibregl.Popup()
+                        .setLngLat(coordinates)
+                        .setHTML(
+                            `<strong>Tower ID:</strong> ${id}<br><strong>Name:</strong> ${name}`,
+                        )
+                        .addTo(map);
+                });
+
+                // Pointer cursors on hover
+                map.on("mouseenter", "clusters", () => {
+                    map.getCanvas().style.cursor = "pointer";
+                });
+                map.on("mouseleave", "clusters", () => {
+                    map.getCanvas().style.cursor = "";
+                });
+                map.on("mouseenter", "unclustered-point", () => {
+                    map.getCanvas().style.cursor = "pointer";
+                });
+                map.on("mouseleave", "unclustered-point", () => {
+                    map.getCanvas().style.cursor = "";
+                });
+            });
+        </script>
+    </body>
+</html>
